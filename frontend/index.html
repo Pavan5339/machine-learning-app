@@ -3,40 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Group Finder</title>
+    <title>Dynamic Cluster Analysis</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #f0f2f5;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+            color: #1c1e21;
             margin: 0;
+            padding: 2rem;
         }
         .container {
+            max-width: 800px;
+            margin: 0 auto;
             background-color: #fff;
             padding: 2rem;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 500px;
-            text-align: center;
         }
         h1 {
-            color: #1c1e21;
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        .input-area {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
             margin-bottom: 1.5rem;
         }
         textarea {
             width: 100%;
-            height: 150px;
+            height: 200px;
             padding: 0.75rem;
             border: 1px solid #dddfe2;
             border-radius: 6px;
             font-size: 1rem;
             resize: vertical;
-            margin-bottom: 1rem;
             box-sizing: border-box;
+        }
+        .file-input {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        input[type="file"] {
+            flex-grow: 1;
         }
         button {
             background-color: #1877f2;
@@ -48,59 +58,167 @@
             font-weight: bold;
             cursor: pointer;
             transition: background-color 0.3s;
+            display: block;
+            width: 100%;
         }
         button:hover {
             background-color: #166fe5;
         }
-        #result {
-            margin-top: 1.5rem;
-            font-size: 1.1rem;
-            color: #1c1e21;
+        #downloadBtn {
+            background-color: #42b72a;
+            margin-top: 1rem;
+            display: none; /* Hidden by default */
+        }
+        #downloadBtn:hover {
+            background-color: #36a420;
+        }
+        .results-area {
+            margin-top: 2rem;
+        }
+        #status {
+            text-align: center;
             font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            border: 1px solid #dddfe2;
+            padding: 0.75rem;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f6f7;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Project Group Finder</h1>
-        <textarea id="description" placeholder="Enter a project description..."></textarea>
-        <button id="predictBtn">Find Group</button>
-        <div id="result"></div>
+        <h1>Dynamic Cluster Analysis</h1>
+        <div class="input-area">
+            <textarea id="text-input" placeholder="Paste your documents here, one per line..."></textarea>
+            <div class="file-input">
+                <label for="file-input">Or upload a .txt file:</label>
+                <input type="file" id="file-upload" accept=".txt">
+            </div>
+        </div>
+        <button id="clusterBtn">Cluster Documents</button>
+        <div class="results-area">
+            <div id="status"></div>
+            <table id="results-table" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Document</th>
+                        <th>Cluster</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <button id="downloadBtn">Download Results as CSV</button>
+        </div>
     </div>
 
     <script>
-        const predictBtn = document.getElementById('predictBtn');
-        const descriptionInput = document.getElementById('description');
-        const resultDiv = document.getElementById('result');
+        const clusterBtn = document.getElementById('clusterBtn');
+        const textInput = document.getElementById('text-input');
+        const fileUpload = document.getElementById('file-upload');
+        const statusDiv = document.getElementById('status');
+        const resultsTable = document.getElementById('results-table');
+        const downloadBtn = document.getElementById('downloadBtn');
 
-        predictBtn.addEventListener('click', () => {
-            const description = descriptionInput.value;
-            if (!description) {
-                resultDiv.textContent = 'Please enter a description.';
-                return;
+        let csvContent = "";
+
+        clusterBtn.addEventListener('click', () => {
+            let documents = [];
+            const file = fileUpload.files[0];
+
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const text = e.target.result;
+                    documents = text.split('\n').map(doc => doc.trim()).filter(doc => doc.length > 0);
+                    if (documents.length > 0) {
+                        performClustering(documents);
+                    } else {
+                        statusDiv.textContent = 'File is empty or does not contain valid documents.';
+                    }
+                };
+                reader.readAsText(file);
+            } else {
+                const text = textInput.value;
+                if (text) {
+                    documents = text.split('\n').map(doc => doc.trim()).filter(doc => doc.length > 0);
+                    if (documents.length > 0) {
+                        performClustering(documents);
+                    } else {
+                        statusDiv.textContent = 'Please enter some documents in the text area.';
+                    }
+                } else {
+                    statusDiv.textContent = 'Please provide documents either by pasting text or uploading a file.';
+                }
             }
+        });
 
-            resultDiv.textContent = 'Finding group...';
+        function performClustering(documents) {
+            statusDiv.textContent = 'Clustering in progress...';
+            resultsTable.style.display = 'none';
+            resultsTable.querySelector('tbody').innerHTML = '';
+            downloadBtn.style.display = 'none';
 
-            fetch('http://127.0.0.1:5000/predict', {
+            fetch('http://127.0.0.1:5000/cluster', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ description: description })
+                body: JSON.stringify({ documents: documents })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    resultDiv.textContent = `Error: ${data.error}`;
-                } else {
-                    resultDiv.textContent = `This project belongs to Cluster ${data.cluster + 1}.`;
+                    statusDiv.textContent = `Error: ${data.error}`;
+                    return;
                 }
+                
+                statusDiv.textContent = `Clustering complete! Found ${data.num_clusters} clusters.`;
+                displayResults(data.results);
             })
             .catch(error => {
                 console.error('Error:', error);
-                resultDiv.textContent = 'An error occurred. Make sure the backend server is running.';
+                statusDiv.textContent = 'An error occurred. Make sure the backend server is running.';
             });
+        }
+
+        function displayResults(results) {
+            const tbody = resultsTable.querySelector('tbody');
+            results.forEach(result => {
+                const row = tbody.insertRow();
+                const cell1 = row.insertCell(0);
+                const cell2 = row.insertCell(1);
+                cell1.textContent = result.document;
+                cell2.textContent = result.cluster + 1;
+            });
+            resultsTable.style.display = 'table';
+
+            // Prepare CSV content
+            let csvRows = ["Document,Cluster"];
+            results.forEach(result => {
+                csvRows.push(`"${result.document.replace(/"/g, '""')}",${result.cluster + 1}`);
+            });
+            csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+            downloadBtn.style.display = 'block';
+        }
+
+        downloadBtn.addEventListener('click', () => {
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "cluster_results.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         });
     </script>
 </body>
