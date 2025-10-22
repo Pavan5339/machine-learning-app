@@ -80,18 +80,19 @@
             font-weight: bold;
             margin-bottom: 1rem;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-        }
-        th, td {
+        .cluster {
+            margin-bottom: 1.5rem;
+            padding: 1rem;
             border: 1px solid #dddfe2;
-            padding: 0.75rem;
-            text-align: left;
+            border-radius: 6px;
         }
-        th {
-            background-color: #f5f6f7;
+        .cluster h3 {
+            margin-top: 0;
+            color: #1877f2;
+        }
+        .cluster ul {
+            list-style-type: disc;
+            padding-left: 20px;
         }
     </style>
 </head>
@@ -99,24 +100,16 @@
     <div class="container">
         <h1>Dynamic Cluster Analysis</h1>
         <div class="input-area">
-            <textarea id="text-input" placeholder="Paste your documents here, one per line..."></textarea>
+            <textarea id="text-input" placeholder="Paste your documents here, with 'Title:' and 'Description:' for each..."></textarea>
             <div class="file-input">
-                <label for="file-input">Or upload a .txt file:</label>
-                <input type="file" id="file-upload" accept=".txt">
+                <label for="file-input">Or upload a .txt or .pdf file:</label>
+                <input type="file" id="file-upload" accept=".txt,.pdf">
             </div>
         </div>
         <button id="clusterBtn">Cluster Documents</button>
         <div class="results-area">
             <div id="status"></div>
-            <table id="results-table" style="display:none;">
-                <thead>
-                    <tr>
-                        <th>Document</th>
-                        <th>Cluster</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+            <div id="results-display"></div>
             <button id="downloadBtn">Download Results as CSV</button>
         </div>
     </div>
@@ -126,35 +119,50 @@
         const textInput = document.getElementById('text-input');
         const fileUpload = document.getElementById('file-upload');
         const statusDiv = document.getElementById('status');
-        const resultsTable = document.getElementById('results-table');
+        const resultsDisplay = document.getElementById('results-display');
         const downloadBtn = document.getElementById('downloadBtn');
 
         let csvContent = "";
 
         clusterBtn.addEventListener('click', () => {
-            let documents = [];
             const file = fileUpload.files[0];
 
             if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const text = e.target.result;
-                    documents = text.split('\n').map(doc => doc.trim()).filter(doc => doc.length > 0);
-                    if (documents.length > 0) {
-                        performClustering(documents);
-                    } else {
-                        statusDiv.textContent = 'File is empty or does not contain valid documents.';
+                // If a file is selected, use the file upload endpoint
+                const formData = new FormData();
+                formData.append('file', file);
+
+                statusDiv.textContent = 'Uploading and clustering file...';
+                resultsDisplay.innerHTML = '';
+                downloadBtn.style.display = 'none';
+
+                fetch('http://127.0.0.1:5000/cluster_file', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        statusDiv.textContent = `Error: ${data.error}`;
+                        return;
                     }
-                };
-                reader.readAsText(file);
+                    statusDiv.textContent = `Clustering complete! Found ${data.num_clusters} clusters.`;
+                    displayResults(data.results);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    statusDiv.textContent = 'An error occurred. Make sure the backend server is running.';
+                });
+
             } else {
+                // If no file is selected, use the text area input
                 const text = textInput.value;
                 if (text) {
-                    documents = text.split('\n').map(doc => doc.trim()).filter(doc => doc.length > 0);
+                    const documents = parseInputText(text);
                     if (documents.length > 0) {
                         performClustering(documents);
                     } else {
-                        statusDiv.textContent = 'Please enter some documents in the text area.';
+                        statusDiv.textContent = 'Please enter some documents with Title and Description.';
                     }
                 } else {
                     statusDiv.textContent = 'Please provide documents either by pasting text or uploading a file.';
@@ -162,10 +170,36 @@
             }
         });
 
+        function parseInputText(text) {
+            const documents = [];
+            const lines = text.split('\n');
+            let currentTitle = null;
+            let currentDescription = null;
+
+            for (const line of lines) {
+                if (line.toLowerCase().startsWith('title:')) {
+                    if (currentTitle && currentDescription) {
+                        documents.push({ title: currentTitle, description: currentDescription });
+                    }
+                    currentTitle = line.substring(6).trim().replace(/"/g, '');
+                    currentDescription = null; // Reset description for the new title
+                } else if (line.toLowerCase().startsWith('description:')) {
+                    currentDescription = line.substring(12).trim().replace(/"/g, '');
+                } else if (currentDescription !== null) {
+                    currentDescription += ' ' + line.trim();
+                }
+            }
+
+            if (currentTitle && currentDescription) {
+                documents.push({ title: currentTitle, description: currentDescription });
+            }
+
+            return documents;
+        }
+
         function performClustering(documents) {
             statusDiv.textContent = 'Clustering in progress...';
-            resultsTable.style.display = 'none';
-            resultsTable.querySelector('tbody').innerHTML = '';
+            resultsDisplay.innerHTML = '';
             downloadBtn.style.display = 'none';
 
             fetch('http://127.0.0.1:5000/cluster', {
@@ -192,18 +226,39 @@
         }
 
         function displayResults(results) {
-            const tbody = resultsTable.querySelector('tbody');
+            // Group results by cluster
+            const clusters = {};
             results.forEach(result => {
-                const row = tbody.insertRow();
-                const cell1 = row.insertCell(0);
-                const cell2 = row.insertCell(1);
-                cell1.textContent = result.document;
-                cell2.textContent = result.cluster + 1;
+                const clusterId = result.cluster;
+                if (!clusters[clusterId]) {
+                    clusters[clusterId] = [];
+                }
+                clusters[clusterId].push(result.document);
             });
-            resultsTable.style.display = 'table';
+
+            // Create and display the HTML for the grouped results
+            resultsDisplay.innerHTML = ''; // Clear previous results
+            Object.keys(clusters).sort().forEach(clusterId => {
+                const clusterDiv = document.createElement('div');
+                clusterDiv.classList.add('cluster');
+
+                const clusterTitle = document.createElement('h3');
+                clusterTitle.textContent = `Cluster ${parseInt(clusterId) + 1}`;
+                clusterDiv.appendChild(clusterTitle);
+
+                const documentList = document.createElement('ul');
+                clusters[clusterId].forEach(doc => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = doc;
+                    documentList.appendChild(listItem);
+                });
+                clusterDiv.appendChild(documentList);
+
+                resultsDisplay.appendChild(clusterDiv);
+            });
 
             // Prepare CSV content
-            let csvRows = ["Document,Cluster"];
+            let csvRows = ["Title,Cluster"];
             results.forEach(result => {
                 csvRows.push(`"${result.document.replace(/"/g, '""')}",${result.cluster + 1}`);
             });
