@@ -1,6 +1,6 @@
 Flask
 Flask-Cors
-scikit-learn
-joblib
+gunicorn
+numpy
 PyPDF2
-fpdf
+scikit-learn

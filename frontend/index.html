@@ -115,7 +115,11 @@
         const resultsDisplay = document.getElementById('results-display');
         
 
-        
+        // Use Render's backend URL if available, otherwise default to local for development
+        const backendUrl = window.location.hostname.includes('onrender.com') 
+            ? `https://${window.location.hostname.replace('-frontend', '')}` // Assumes backend is at a similar URL
+            : 'http://127.0.0.1:5000';
+
 
         clusterBtn.addEventListener('click', () => {
             const file = fileUpload.files[0];
@@ -129,7 +133,7 @@
                 resultsDisplay.innerHTML = '';
 
 
-                fetch('http://127.0.0.1:5000/cluster_file', {
+                fetch(`${backendUrl}/cluster_file`, {
                     method: 'POST',
                     body: formData
                 })
@@ -195,7 +199,7 @@
             resultsDisplay.innerHTML = '';
             
 
-            fetch('http://127.0.0.1:5000/cluster', {
+            fetch(`${backendUrl}/cluster`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
