@@ -1,119 +1,168 @@
+import os
+import io
+import PyPDF2 
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_cors import CORS  # Make sure this import is here
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
-import numpy as np
-import os
-from PyPDF2 import PdfReader
-import io
+from sklearn.metrics import silhouette_score
 
 app = Flask(__name__)
-CORS(app)
 
-def parse_text_to_documents(text):
+# --- THIS IS THE FIX ---
+# We are explicitly telling the server to allow requests
+# from your live frontend URL.
+frontend_url = "https.machine-frontends.onrender.com"
+CORS(app, resources={r"/*": {"origins": [frontend_url, "http://127.0.0.1:5500", "http://localhost:5500"]}})
+# --- END OF FIX ---
+
+
+# Helper function to parse the text with "Title:" and "Description:"
+def parse_documents_from_text(text):
     documents = []
-    lines = text.split('\n')
     current_title = None
     current_description = ""
+    full_text_list = []
 
-    for line in lines:
+    for line in text.split('\n'):
+        # Clean up lines
         line = line.strip()
+
+        # Check for title
         if line.lower().startswith('title:'):
-            if current_title is not None:
-                documents.append({'title': current_title, 'description': current_description.strip()})
-            current_title = line[6:].strip().strip('"')
+            # If we have a previous description, save it
+            if current_title and current_description:
+                documents.append({"title": current_title, "description": current_description.strip()})
+                full_text_list.append(f"{current_title} {current_description.strip()}")
+
+            # Start a new document
+            current_title = line[6:].strip().replace('"', '')
             current_description = ""
         elif line.lower().startswith('description:'):
-            current_description = line[12:].strip().strip('"')
-        elif current_title is not None:
+            current_description = line[12:].strip().replace('"', '')
+        elif current_title and line: # Continue appending to the current description
             current_description += " " + line
     
-    if current_title is not None:
-        documents.append({'title': current_title, 'description': current_description.strip()})
+    # Add the last document
+    if current_title and current_description:
+        documents.append({"title": current_title, "description": current_description.strip()})
+        full_text_list.append(f"{current_title} {current_description.strip()}")
 
-    return documents
+    return documents, full_text_list
 
-def perform_clustering(documents):
-    if len(documents) < 2:
-        return {'error': 'At least 2 documents are required to perform clustering'}
+# Helper function to perform the clustering
+def perform_clustering(text_list):
+    if len(text_list) < 2:
+        return None, 0 # Not enough data to cluster
 
-    titles = [doc.get('title', '') for doc in documents]
-    descriptions = [doc.get('description', '') for doc in documents]
+    # 1. Vectorize the text
+    vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+    X = vectorizer.fit_transform(text_list)
 
-    vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 2), min_df=2, max_df=0.8)
-    X = vectorizer.fit_transform(descriptions)
+    # 2. Find the best number of clusters (k)
+    # We'll test k from 2 to min(10, num_samples - 1)
+    max_k = min(10, len(text_list) - 1)
+    if max_k < 2:
+        return None, 1 # Still not enough unique data
+    
+    best_k = 2
+    best_score = -1
 
-    inertia = []
-    max_clusters = min(11, len(descriptions))
-    K = range(2, max_clusters)
-    if not K:
-        optimal_num_clusters = 2
-    else:
-        for k in K:
-            kmeans_model = KMeans(n_clusters=k, init='k-means++', max_iter=100, n_init=1, random_state=42)
-            kmeans_model.fit(X)
-            inertia.append(kmeans_model.inertia_)
+    for k in range(2, max_k + 1):
+        kmeans_test = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labels = kmeans_test.fit_predict(X)
+        score = silhouette_score(X, labels)
+        if score > best_score:
+            best_score = score
+            best_k = k
 
-        if len(K) > 1:
-            points = np.array([list(K), inertia]).T
-            first_point = points[0]
-            last_point = points[-1]
-            line_vec = last_point - first_point
-            line_vec_norm = line_vec / np.sqrt(np.sum(line_vec**2))
-            vec_from_first = points - first_point
-            scalar_product = np.sum(vec_from_first * np.tile(line_vec_norm, (len(K), 1)), axis=1)
-            vec_from_first_parallel = np.outer(scalar_product, line_vec_norm)
-            vec_to_line = vec_from_first - vec_from_first_parallel
-            dist_to_line = np.sqrt(np.sum(vec_to_line ** 2, axis=1))
-            optimal_num_clusters = K[np.argmax(dist_to_line)]
-        else:
-            optimal_num_clusters = 2
+    # 3. Run final clustering with the best k
+    kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+    final_labels = kmeans.fit_predict(X)
+    
+    return final_labels, best_k
 
-    model = KMeans(n_clusters=optimal_num_clusters, init='k-means++', max_iter=100, n_init=1, random_state=42)
-    model.fit(X)
-    labels = model.labels_
-
-    results = []
-    for i, title in enumerate(titles):
-        results.append({'document': title, 'cluster': int(labels[i])})
-
-    return {'results': results, 'num_clusters': optimal_num_clusters}
-
+# --- API Endpoint for Text Input ---
 @app.route('/cluster', methods=['POST'])
 def cluster_text():
-    data = request.get_json()
-    if not data or 'documents' not in data:
-        return jsonify({'error': 'Invalid input: "documents" not found in request body'}), 400
-    
-    results = perform_clustering(data['documents'])
-    if 'error' in results:
-        return jsonify(results), 400
-    return jsonify(results)
+    try:
+        data = request.get_json()
+        # The JS sends 'documents' which is a list of {'title': ..., 'description': ...}
+        doc_objects = data.get('documents', [])
+        
+        # Combine title and description for clustering
+        text_list = [f"{doc['title']} {doc['description']}" for doc in doc_objects]
+        
+        if len(text_list) < 2:
+            return jsonify({"error": "Not enough documents to cluster. Please provide at least 2."}), 400
 
+        labels, num_clusters = perform_clustering(text_list)
+        
+        if labels is None:
+            return jsonify({"error": "Could not perform clustering. Not enough unique data."}), 400
+
+        # Format the response exactly as the JS expects
+        results = []
+        for i, doc in enumerate(doc_objects):
+            results.append({
+                "document": doc['title'], # The JS expects the 'document' key to be the title
+                "cluster": int(labels[i])
+            })
+            
+        return jsonify({"results": results, "num_clusters": num_clusters})
+
+    except Exception as e:
+        print(f"Error in /cluster: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- API Endpoint for File Upload ---
 @app.route('/cluster_file', methods=['POST'])
 def cluster_file():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part in the request'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file part"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
 
-    text = ""
-    if file.filename.endswith('.pdf'):
-        try:
-            pdf_reader = PdfReader(io.BytesIO(file.read()))
-            for page in pdf_reader.pages:
+        text = ""
+        if file.filename.endswith('.txt'):
+            text = file.read()..decode('utf-8')
+        elif file.filename.endswith('.pdf'):
+            # Read PDF content using PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
+            for page in reader.pages:
                 text += page.extract_text()
-        except Exception as e:
-            return jsonify({'error': f'Error reading PDF file: {e}'}), 500
-    elif file.filename.endswith('.txt'):
-        text = file.read().decode('utf-8')
-    else:
-        return jsonify({'error': 'Unsupported file type. Please upload a .txt or .pdf file.'}), 400
+        else:
+            return jsonify({"error": "Invalid file type. Please upload .txt or .pdf"}), 400
 
-    documents = parse_text_to_documents(text)
-    results = perform_clustering(documents)
-    if 'error' in results:
-        return jsonify(results), 400
-    return jsonify(results)
+        # Now that we have the text, parse it
+        documents, text_list = parse_documents_from_text(text)
+        
+        if len(text_list) < 2:
+            return jsonify({"error": "Not enough documents found in file to cluster."}), 400
+        
+        labels, num_clusters = perform_clustering(text_list)
+        
+        if labels is None:
+            return jsonify({"error": "Could not perform clustering. Not enough unique data."}), 400
+
+        results = []
+        for i, doc in enumerate(documents):
+            results.append({
+                "document": doc['title'],
+                "cluster": int(labels[i])
+            })
+            
+        return jsonify({"results": results, "num_clusters": num_clusters})
+
+    except Exception as e:
+        print(f"Error in /cluster_file: {e}")
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    # Use the PORT environment variable Render provides
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
