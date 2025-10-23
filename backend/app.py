@@ -128,12 +128,16 @@ def cluster_file():
 
         text = ""
         if file.filename.endswith('.txt'):
-            text = file.read()..decode('utf-8')
+            # --- THIS IS THE FIX ---
+            text = file.read().decode('utf-8') # Removed the extra dot
+            # --- END OF FIX ---
         elif file.filename.endswith('.pdf'):
             # Read PDF content using PyPDF2
             reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
             for page in reader.pages:
-                text += page.extract_text()
+                text_content = page.extract_text()
+                if text_content:
+                    text += text_content
         else:
             return jsonify({"error": "Invalid file type. Please upload .txt or .pdf"}), 400
 
@@ -165,4 +169,6 @@ if __name__ == '__main__':
     # Use the PORT environment variable Render provides
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
+
 
