@@ -9,11 +9,9 @@ from sklearn.metrics import silhouette_score
 
 app = Flask(__name__)
 
-# --- THIS IS THE FIX ---
-# We are explicitly telling the server to allow requests
-# from your live frontend URL.
-frontend_url = "https.machine-frontends.onrender.com"
-CORS(app, resources={r"/*": {"origins": [frontend_url, "http://127.0.0.1:5500", "http://localhost:5500"]}})
+# --- THIS IS THE NEW FIX ---
+# This is a simpler, broader CORS setting that allows all origins.
+CORS(app)
 # --- END OF FIX ---
 
 
@@ -128,9 +126,7 @@ def cluster_file():
 
         text = ""
         if file.filename.endswith('.txt'):
-            # --- THIS IS THE FIX ---
-            text = file.read().decode('utf-8') # Removed the extra dot
-            # --- END OF FIX ---
+            text = file.read().decode('utf-8')
         elif file.filename.endswith('.pdf'):
             # Read PDF content using PyPDF2
             reader = PyPDF2.PdfReader(io.BytesIO(file.read()))
@@ -169,6 +165,4 @@ if __name__ == '__main__':
     # Use the PORT environment variable Render provides
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-
-
 
