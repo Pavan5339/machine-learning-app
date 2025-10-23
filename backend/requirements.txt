@@ -3,3 +3,4 @@ Flask-Cors
 scikit-learn
 joblib
 PyPDF2
+fpdf
