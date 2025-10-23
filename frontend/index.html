@@ -115,10 +115,10 @@
         const resultsDisplay = document.getElementById('results-display');
         
 
-        // Use Render's backend URL if available, otherwise default to local for development
-        const backendUrl = window.location.hostname.includes('onrender.com') 
-            ? `https://${window.location.hostname.replace('-frontend', '')}` // Assumes backend is at a similar URL
-            : 'http://127.0.0.1:5000';
+        // --- THIS IS THE FIX ---
+        // We are hard-coding the correct URL of your LIVE backend
+        const backendUrl = 'https://model-ijrn.onrender.com';
+        // --- END OF FIX ---
 
 
         clusterBtn.addEventListener('click', () => {
@@ -137,7 +137,13 @@
                     method: 'POST',
                     body: formData
                 })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        // Get error details from the backend
+                        return response.json().then(err => { throw new Error(err.error) });
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.error) {
                         statusDiv.textContent = `Error: ${data.error}`;
@@ -148,7 +154,8 @@
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    statusDiv.textContent = 'An error occurred. Make sure the backend server is running.';
+                    // Show the specific error from the backend if available
+                    statusDiv.textContent = `An error occurred: ${error.message}`;
                 });
 
             } else {
@@ -182,7 +189,7 @@
                     currentDescription = null; // Reset description for the new title
                 } else if (line.toLowerCase().startsWith('description:')) {
                     currentDescription = line.substring(12).trim().replace(/"/g, '');
-                } else if (currentDescription !== null) {
+                } else if (currentDescription !== null && line.trim()) {
                     currentDescription += ' ' + line.trim();
                 }
             }
@@ -206,7 +213,13 @@
                 },
                 body: JSON.stringify({ documents: documents })
             })
-            .then(response => response.json())
+            .then(response => {
+                 if (!response.ok) {
+                    // Get error details from the backend
+                    return response.json().then(err => { throw new Error(err.error) });
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.error) {
                     statusDiv.textContent = `Error: ${data.error}`;
@@ -218,7 +231,7 @@
             })
             .catch(error => {
                 console.error('Error:', error);
-                statusDiv.textContent = 'An error occurred. Make sure the backend server is running.';
+                statusDiv.textContent = `An error occurred: ${error.message}`;
             });
         }
 
@@ -261,3 +274,4 @@
     </script>
 </body>
 </html>
+
