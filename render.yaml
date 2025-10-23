@@ -3,7 +3,7 @@ services:
   - type: web
     name: machine-learning-backend
     env: python
-    region: singapore
+    
     plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn -w 4 -b 0.0.0.0:10000 app:app"
@@ -17,7 +17,7 @@ services:
   - type: web
     name: machine-learning-frontend
     env: static
-    region: singapore
+    
     plan: free
     staticPublishPath: ./frontend
     routes:
